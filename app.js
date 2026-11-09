@@ -366,18 +366,40 @@ async function getOcr(){
   if (!ocrLoading) ocrLoading=(async()=>{
     if (!window.Tesseract) await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
     const w=await Tesseract.createWorker("eng",1);
-    await w.setParameters({tessedit_char_whitelist:"ABCDEFGHJKLMNPRSTUVWXYZ0123456789", tessedit_pageseg_mode:"6", preserve_interword_spaces:"0"});
+    await w.setParameters({tessedit_char_whitelist:"ABCDEFGHJKLMNPRSTUVWXYZ0123456789", tessedit_pageseg_mode:"6"});
     ocrWorker=w; return w;
   })().catch(e=>{ ocrLoading=null; throw e; });
   return ocrLoading;
 }
-function vinFromText(raw){
-  const lines=String(raw||"").toUpperCase().split(/\n+/);
-  const fix=s=>s.replace(/O/g,"0").replace(/[IL|]/g,m=>m==="L"?"L":"1").replace(/Q/g,"0");
-  for (const line of [...lines, lines.join("")]){
-    const t=fix(line.replace(/[^A-Z0-9|]/g,""));
-    for (let i=0;i+17<=t.length;i++){ const v=t.slice(i,i+17); if (VIN_RE.test(v) && vinCheck(v)) return v; }
+// Pull a VIN out of what the text reader saw. Strict on purpose, because about 1 in 11 random strings
+// passes the VIN check digit. Only two real layouts count:
+//   - a line that IS the VIN (windshield plate): 17 characters, or 18 with one stray edge character;
+//   - the 17 characters right after the word "VIN" (door-jamb label).
+// The 10th character must be a real model-year code, and two different candidates in one frame = no answer.
+const YEAR_CODES = "ABCDEFGHJKLMNPRSTVWXY123456789";
+const vinOk = v => VIN_RE.test(v) && vinCheck(v) && YEAR_CODES.includes(v[9]) && !/^0/.test(v);
+function vinFromOcr(data){
+  const lines = String((data && data.text) || "").toUpperCase().split(/\n+/);
+  const found = new Set();
+  for (const line of lines){
+    const t = line.replace(/[^A-Z0-9]/g,"");
+    const pieces = line.trim().split(/\s+/).filter(Boolean).length;   // a printed VIN is one solid run
+    const cands = [];
+    if (pieces<=3 && t.length===17) cands.push(t);
+    if (pieces<=3 && t.length===18) cands.push(t.slice(1), t.slice(0,17));
+    const m = t.match(/V[I1]?N([A-Z0-9]{17})/);
+    if (m) cands.push(m[1]);
+    for (const v of cands) if (vinOk(v)) found.add(v);
   }
+  return found.size===1 ? [...found][0] : null;
+}
+// Barcodes: a VIN barcode holds exactly the VIN (door-jamb Code 39 often adds a leading "I"). Anything else
+// is only taken as a stock number if it is short and looks like one. Long or odd codes are ignored.
+function classifyBarcode(raw){
+  const t=String(raw||"").toUpperCase().trim().replace(/\s+/g,"");
+  const v = t.length===18 && t[0]==="I" ? t.slice(1) : t;
+  if (VIN_RE.test(v)) return vinCheck(v) ? {vin:v} : null;
+  if (/^[A-Z0-9-]{4,12}$/.test(t) && /\d/.test(t)) return {stock:t};
   return null;
 }
 // Grayscale, stretch contrast and enlarge a crop so small plate text reads better. invert=true for light text on dark.
@@ -394,7 +416,7 @@ function prepForOcr(src, invert){
 async function readVinText(cropCanvas, invert){
   const w=await getOcr();
   const {data}=await w.recognize(prepForOcr(cropCanvas, invert));
-  return vinFromText(data && data.text);
+  return vinFromOcr(data);
 }
 
 let scanCb=null;
@@ -450,12 +472,13 @@ async function openScanner(cb){
       let text=null;
       try{ text = detector ? ((await detector.detect(cv))[0]||{}).rawValue||null : decodeCanvas(cv); }catch{}
       if(!text && detector && n%6===0) text=decodeCanvas(cv);
-      const r=text?classify(text):null;
+      const r=text?classifyBarcode(text):null;
       if(r){
         const key=r.vin||r.stock;
         if(key===last) lastCount++; else { last=key; lastCount=1; }
         // A VIN with a valid check digit is accepted at once; anything else must read the same twice.
-        if((r.vin && vinCheck(r.vin)) || lastCount>=2){ try{ navigator.vibrate&&navigator.vibrate(80); }catch{} hint.textContent="Got it: "+key; close(r); return; }
+        // Accept at once only if it matches a car already on the board; otherwise it must read the same twice in a row.
+        if(findCar(r) || lastCount>=2){ try{ navigator.vibrate&&navigator.vibrate(80); }catch{} hint.textContent="Got it: "+key; close(r); return; }
       }
     }
     timer=setTimeout(tick, detector?60:100);
@@ -470,13 +493,17 @@ async function openScanner(cb){
     try{ await getOcr(); }catch{ return; }   // text reading unavailable: barcode scanning carries on
     if(!running) return;
     hint.textContent="Reading barcode or printed VIN. Fill the box with the VIN.";
-    let k=0;
+    let k=0; const ocrSeen={};
     while(running){
       if(video.readyState>=2 && video.videoWidth){
         const vw=video.videoWidth, vh=video.videoHeight, cw=Math.round(vw*0.9), ch=Math.round(Math.min(vh, cw*0.4));
         ocrCv.width=cw; ocrCv.height=ch; octx.drawImage(video,Math.round((vw-cw)/2),Math.round((vh-ch)/2),cw,ch,0,0,cw,ch);
         let v=null; try{ v=await readVinText(ocrCv, (k++%2)===1); }catch{}
-        if(v){ succeed(v); return; }
+        if(v){
+          // Printed text: accept a VIN already on the board at once; a new VIN must be read twice.
+          ocrSeen[v]=(ocrSeen[v]||0)+1;
+          if(findCar({vin:v}) || ocrSeen[v]>=2){ succeed(v); return; }
+        }
       } else await new Promise(r=>setTimeout(r,150));
     }
   }, 1200);
@@ -486,7 +513,7 @@ $("cam").addEventListener("change", async e=>{
   busy("Reading barcode…");
   let bmp; try{ bmp=await createImageBitmap(f); }catch{ busy(null); toast("Couldn't open that photo. Try again."); return; }
   const txt=await decodeBarcode(bmp);
-  busy(null); cb(txt?classify(txt):null);
+  busy(null); cb(txt?classifyBarcode(txt):null);
 });
 function findCar(r){
   if(!r) return null;
