@@ -329,6 +329,46 @@ async function makeDetector(){
     return new BarcodeDetector({formats:["code_39","code_128","data_matrix","qr_code","pdf417"].filter(f=>have.includes(f))});
   }catch{ return null; }
 }
+/* ---------- printed-VIN reader (windshield plate, door-jamb text) ---------- */
+// Loaded only when a scan finds no barcode. Accepts only a 17-character VIN whose check digit is valid.
+let ocrWorker=null, ocrLoading=null;
+function loadScript(src){ return new Promise((ok,fail)=>{ const s=document.createElement("script"); s.src=src; s.onload=ok; s.onerror=fail; document.head.append(s); }); }
+async function getOcr(){
+  if (ocrWorker) return ocrWorker;
+  if (!ocrLoading) ocrLoading=(async()=>{
+    if (!window.Tesseract) await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
+    const w=await Tesseract.createWorker("eng",1);
+    await w.setParameters({tessedit_char_whitelist:"ABCDEFGHJKLMNPRSTUVWXYZ0123456789", tessedit_pageseg_mode:"6", preserve_interword_spaces:"0"});
+    ocrWorker=w; return w;
+  })().catch(e=>{ ocrLoading=null; throw e; });
+  return ocrLoading;
+}
+function vinFromText(raw){
+  const lines=String(raw||"").toUpperCase().split(/\n+/);
+  const fix=s=>s.replace(/O/g,"0").replace(/[IL|]/g,m=>m==="L"?"L":"1").replace(/Q/g,"0");
+  for (const line of [...lines, lines.join("")]){
+    const t=fix(line.replace(/[^A-Z0-9|]/g,""));
+    for (let i=0;i+17<=t.length;i++){ const v=t.slice(i,i+17); if (VIN_RE.test(v) && vinCheck(v)) return v; }
+  }
+  return null;
+}
+// Grayscale, stretch contrast and enlarge a crop so small plate text reads better. invert=true for light text on dark.
+function prepForOcr(src, invert){
+  const scale=Math.max(1, Math.min(3, 1400/src.width));
+  const cv=document.createElement("canvas"); cv.width=Math.round(src.width*scale); cv.height=Math.round(src.height*scale);
+  const g=cv.getContext("2d",{willReadFrequently:true}); g.imageSmoothingQuality="high"; g.drawImage(src,0,0,cv.width,cv.height);
+  const im=g.getImageData(0,0,cv.width,cv.height), d=im.data; let lo=255, hi=0;
+  for (let i=0;i<d.length;i+=4){ const y=(d[i]*299+d[i+1]*587+d[i+2]*114)/1000; d[i]=y; if(y<lo) lo=y; if(y>hi) hi=y; }
+  const span=Math.max(1,hi-lo);
+  for (let i=0;i<d.length;i+=4){ let y=(d[i]-lo)*255/span; if(invert) y=255-y; d[i]=d[i+1]=d[i+2]=y; }
+  g.putImageData(im,0,0); return cv;
+}
+async function readVinText(cropCanvas, invert){
+  const w=await getOcr();
+  const {data}=await w.recognize(prepForOcr(cropCanvas, invert));
+  return vinFromText(data && data.text);
+}
+
 let scanCb=null;
 function photoScan(cb){ scanCb=cb; const i=$("cam"); i.value=""; i.click(); }
 function startScan(cb){ if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) openScanner(cb); else photoScan(cb); }
@@ -366,7 +406,7 @@ async function openScanner(cb){
     if(caps.torch){ torchBtn.hidden=false; let on=false;
       torchBtn.onclick=async()=>{ on=!on; try{ await track.applyConstraints({advanced:[{torch:on}]}); torchBtn.textContent=on?"Flashlight off":"Flashlight"; }catch{} }; }
   }catch{}
-  hint.textContent="Hold the VIN or stock barcode inside the box";
+  hint.textContent="Hold the VIN barcode, printed VIN or stock tag inside the box";
   const detector=await makeDetector();
   const cv=document.createElement("canvas"), ctx=cv.getContext("2d",{willReadFrequently:true});
   let n=0;
@@ -393,6 +433,25 @@ async function openScanner(cb){
     timer=setTimeout(tick, detector?60:100);
   };
   tick();
+
+  // No barcode after a moment? Also read printed text (windshield VIN plate, door-jamb label) alongside the barcode reader.
+  const ocrCv=document.createElement("canvas"), octx=ocrCv.getContext("2d",{willReadFrequently:true});
+  const succeed=v=>{ if(!running) return; try{ navigator.vibrate&&navigator.vibrate(80); }catch{} hint.textContent="Got it: "+v; close({vin:v}); };
+  setTimeout(async()=>{
+    if(!running) return;
+    try{ await getOcr(); }catch{ return; }   // text reading unavailable: barcode scanning carries on
+    if(!running) return;
+    hint.textContent="Reading barcode or printed VIN. Fill the box with the VIN.";
+    let k=0;
+    while(running){
+      if(video.readyState>=2 && video.videoWidth){
+        const vw=video.videoWidth, vh=video.videoHeight, cw=Math.round(vw*0.9), ch=Math.round(Math.min(vh, cw*0.4));
+        ocrCv.width=cw; ocrCv.height=ch; octx.drawImage(video,Math.round((vw-cw)/2),Math.round((vh-ch)/2),cw,ch,0,0,cw,ch);
+        let v=null; try{ v=await readVinText(ocrCv, (k++%2)===1); }catch{}
+        if(v){ succeed(v); return; }
+      } else await new Promise(r=>setTimeout(r,150));
+    }
+  }, 1200);
 }
 $("cam").addEventListener("change", async e=>{
   const f=e.target.files&&e.target.files[0]; const cb=scanCb; scanCb=null; if(!f||!cb) return;
