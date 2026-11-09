@@ -156,6 +156,16 @@ body{margin:0;padding-bottom:env(safe-area-inset-bottom,0px)}
 .authform .btn{width:100%}
 .authcard .actions{justify-content:space-between}
 .tools{gap:4px;flex-wrap:wrap}
+.car.withthumb{grid-template-columns:64px minmax(0,1fr) auto}
+.car.withthumb .meta{grid-column:2/-1}
+.thumb{grid-row:span 2;width:64px;height:48px;border-radius:6px;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;overflow:hidden;color:var(--muted)}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb svg{width:22px;height:22px}
+.photo{display:flex;flex-direction:column;gap:8px}
+.photo img{width:100%;max-height:300px;object-fit:cover;border-radius:var(--r);border:1px solid var(--line);background:var(--surface-2)}
+.photo .btn{align-self:flex-start}
+.btn.addphoto{height:64px;border-style:dashed;color:var(--muted);width:100%}
+@media (max-width:440px){.car.withthumb{grid-template-columns:52px minmax(0,1fr) auto}.thumb{width:52px;height:40px}}
 </style>
 </head>
 <body>
@@ -211,6 +221,7 @@ body{margin:0;padding-bottom:env(safe-area-inset-bottom,0px)}
 <div id="sheetRoot" hidden></div>
 <div id="toast" class="toast" hidden></div>
 <input id="cam" type="file" accept="image/*" capture="environment" hidden>
+<input id="photoFile" type="file" accept="image/*" capture="environment" hidden>
 <input id="importFile" type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js"></script>

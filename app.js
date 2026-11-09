@@ -27,7 +27,50 @@ const who = id => !id ? "Someone" : (id===S.me?.id ? "You" : (S.people[id]?.name
 const must = async q => { const {data, error} = await q; if (error) throw error; return data; };
 
 const fromRow = r => ({id:r.id, stock:r.stock, vin:r.vin||"", year:r.year, model:r.model||"", trim:r.trim_level||"", color:r.color||"", type:r.type||"",
-  area:r.area||"", spot:r.spot||"", keys:r.keys||"", note:r.note||"", updatedAt:r.updated_at?Date.parse(r.updated_at):null, updatedBy:r.updated_by});
+  area:r.area||"", spot:r.spot||"", keys:r.keys||"", note:r.note||"", updatedAt:r.updated_at?Date.parse(r.updated_at):null, updatedBy:r.updated_by, photo:r.photo_path||""});
+
+/* ---------- photos ---------- */
+const photoUrls = {}, photoTried = new Set(); let photoBusy = false;
+async function ensurePhotoUrls(paths){
+  const need = [...new Set(paths.filter(p=>p && !photoUrls[p] && !photoTried.has(p)))];
+  need.forEach(p=>photoTried.add(p));
+  if (!need.length || photoBusy) return;
+  photoBusy = true;
+  try{ for (let i=0;i<need.length;i+=100){ const d = await must(sb.storage.from("car-photos").createSignedUrls(need.slice(i,i+100), 60*60*12)); d.forEach(x=>{ if(x.signedUrl) photoUrls[x.path]=x.signedUrl; }); } }catch{}
+  photoBusy = false; queueRender();
+}
+function thumb(c){
+  const box = el("span",{class:"thumb","aria-hidden":"true"});
+  const u = c.photo && photoUrls[c.photo];
+  if (u) box.append(el("img",{src:u,alt:"",loading:"lazy"}));
+  else box.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
+  return box;
+}
+async function shrinkPhoto(file){
+  const bmp = await createImageBitmap(file);
+  const sc = Math.min(1, 1280/Math.max(bmp.width,bmp.height));
+  const cv = document.createElement("canvas"); cv.width=Math.round(bmp.width*sc); cv.height=Math.round(bmp.height*sc);
+  cv.getContext("2d").drawImage(bmp,0,0,cv.width,cv.height);
+  return await new Promise(r=>cv.toBlob(r,"image/jpeg",0.8));
+}
+let photoCb = null;
+function pickPhoto(cb){ photoCb=cb; const i=$("photoFile"); i.value=""; i.click(); }
+$("photoFile").addEventListener("change", e=>{ const f=e.target.files&&e.target.files[0]; const cb=photoCb; photoCb=null; if(f&&cb) cb(f); });
+async function savePhoto(c, file){
+  busy("Uploading photo…");
+  try{
+    const blob = await shrinkPhoto(file);
+    if (!blob) throw new Error("shrink");
+    const path = `${c.id}/${Date.now()}.jpg`;
+    const {error:upErr} = await sb.storage.from("car-photos").upload(path, blob, {contentType:"image/jpeg"});
+    if (upErr) throw upErr;
+    const d = await must(sb.from("cars").update({photo_path:path}).eq("id",c.id).select());
+    if (!d.length) throw "denied";
+    if (c.photo) sb.storage.from("car-photos").remove([c.photo]).catch(()=>{});
+    upsertLocal(d[0]); busy(null); toast("Photo saved");
+    if (S.open?.kind==="car" && S.open.id===c.id){ await ensurePhotoUrls([path]); openCar(c.id); }
+  }catch(e){ busy(null); toast(e==="denied"||/security|permission/i.test(String(e&&e.message))?"You don't have permission to add photos. Ask a manager.":"Couldn't upload the photo. Check your connection and try again."); }
+}
 const detailsRow = d => ({stock:d.stock, vin:d.vin, year:d.year, model:d.model, trim_level:d.trim, color:d.color, type:d.type});
 
 /* ---------- main list ---------- */
@@ -68,9 +111,11 @@ function render(){
       single ? el("button",{class:"btn primary",type:"button",onclick:()=>openForm(null, preFrom(classify(S.q)))}, `+ Add ${S.q.toUpperCase()} as a new car`) : null));
     return;
   }
+  ensurePhotoUrls(rows.slice(0,300).map(c=>c.photo));
   list.replaceChildren(...rows.map(c=>{
     const stale = c.updatedAt && Date.now()-c.updatedAt>STALE_MS && c.area!=="SHW";
-    return el("li",{}, el("button",{class:"car",type:"button",onclick:()=>openCar(c.id)},
+    return el("li",{}, el("button",{class:"car withthumb",type:"button",onclick:()=>openCar(c.id)},
+      thumb(c),
       el("div",{class:"id"}, el("span",{class:"stock",text:"#"+c.stock}), el("span",{class:"name",text:carName(c)}), c.type?el("span",{class:"tag",text:c.type}):null),
       el("div",{class:"loc"}, el("span",{class:"spot",text:c.spot||AREA[c.area]?.name||"Not located yet"}), sign(c.area)),
       el("div",{class:"meta"},
@@ -110,6 +155,7 @@ async function openCar(id){
   S.open = {kind:"car", id};
   let hist = [];
   try { hist = await must(sb.from("moves").select("area,spot,keys,note,moved_by,moved_at").eq("car_id",id).order("moved_at",{ascending:false}).limit(20)); } catch {}
+  if (c.photo && !photoUrls[c.photo]) await ensurePhotoUrls([c.photo]);
   if (S.open?.id!==id) return;
   let area = c.area;
   const spot = el("input",{id:"p-spot",type:"text",value:c.spot||"",placeholder:"e.g. Row C, space 14 · by the ramp",autocomplete:"off"});
@@ -131,6 +177,10 @@ async function openCar(id){
     el("div",{class:"sheethead"}, el("div",{}, el("span",{class:"label",text:(c.type||"Vehicle")+" · Stock #"+c.stock}), el("h2",{text:carName(c)}),
         el("div",{class:"sub"}, c.color?el("span",{text:c.color}):null, c.vin?el("span",{class:"mono",text:"VIN "+c.vin}):null)),
       el("button",{class:"x",type:"button","aria-label":"Close",onclick:closeSheet},"×")),
+    c.photo && photoUrls[c.photo]
+      ? el("div",{class:"photo"}, el("img",{src:photoUrls[c.photo],alt:`Photo of ${carName(c)}, stock #${c.stock}`}),
+          el("button",{class:"btn",type:"button",onclick:()=>pickPhoto(f=>savePhoto(c,f))}, "Replace photo"))
+      : el("button",{class:"btn addphoto",type:"button",onclick:()=>pickPhoto(f=>savePhoto(c,f))}, scanIcon2(), "Add a photo of this car"),
     el("div",{class:"now"}, sign(c.area), el("div",{}, el("b",{text:(AREA[c.area]?.name||"Not located yet")+(c.spot?" · "+c.spot:"")}),
       el("span",{text: c.updatedAt ? `Last parked ${ago(c.updatedAt)} by ${who(c.updatedBy)}${c.keys?" · Keys: "+c.keys:""}${c.note?" · "+c.note:""}` : "Not located yet. Set its spot the first time you see it."}))),
     el("div",{class:"field"}, el("span",{class:"label",text:"Where did you leave it?"}), areaPicker(area, v=>area=v)),
@@ -237,6 +287,7 @@ function classify(raw){
 }
 const preFrom = r => !r ? {} : r.vin ? {vin:r.vin, year:vinYear(r.vin)} : {stock:r.stock};
 function scanIcon(){ const s=el("span",{style:"display:grid"}); s.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7V4h3M18 4h3v3M21 17v3h-3M6 20H3v-3M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>'; return s; }
+function scanIcon2(){ const s=el("span",{style:"display:grid"}); s.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>'; return s; }
 let zx=null, zxHints=null;
 async function decodeBarcode(bmp){
   const Z=window.ZXing; if(!Z) return null;

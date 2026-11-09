@@ -108,3 +108,18 @@ do $$ begin
   alter publication supabase_realtime add table public.cars;
 exception when duplicate_object then null;
 end $$;
+
+-- Car photos: one current photo per car, stored privately and visible only to approved staff.
+alter table public.cars add column if not exists photo_path text;
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('car-photos', 'car-photos', false, 5242880, array['image/jpeg','image/png','image/webp'])
+on conflict (id) do nothing;
+drop policy if exists "team reads car photos" on storage.objects;
+create policy "team reads car photos" on storage.objects for select
+  using (bucket_id = 'car-photos' and public.my_role() in ('staff','manager'));
+drop policy if exists "team adds car photos" on storage.objects;
+create policy "team adds car photos" on storage.objects for insert
+  with check (bucket_id = 'car-photos' and public.my_role() in ('staff','manager'));
+drop policy if exists "team removes car photos" on storage.objects;
+create policy "team removes car photos" on storage.objects for delete
+  using (bucket_id = 'car-photos' and public.my_role() in ('staff','manager'));
