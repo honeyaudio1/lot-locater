@@ -46,3 +46,6 @@ Open the app and tap **Create an account**. **The first account becomes the mana
 - The public key in `config.js` is safe to share. The database rules only let approved staff see or change cars.
 - Supabase's free plan pauses a project after 7 days with no activity. Daily use keeps it awake. If it ever pauses, click **Restore** in Supabase.
 - To change the level names, edit the `AREAS` list at the top of `app.js`.
+
+## Stock photos
+Cars without their own photo show a stock photo of the Honda model, labeled "Stock photo". These come from Wikipedia / Wikimedia Commons (free licenses such as CC BY-SA). Each photo links to its Commons page, which credits the photographer and states the license. Each phone looks them up once and remembers them. Taking a real photo of a car replaces its stock photo.

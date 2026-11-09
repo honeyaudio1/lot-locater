@@ -40,10 +40,51 @@ async function ensurePhotoUrls(paths){
   try{ for (let i=0;i<need.length;i+=100){ const d = await must(sb.storage.from("car-photos").createSignedUrls(need.slice(i,i+100), 60*60*12)); d.forEach(x=>{ if(x.signedUrl) photoUrls[x.path]=x.signedUrl; }); } }catch{}
   photoBusy = false; queueRender();
 }
+/* Stock photos of the model (Wikipedia / Wikimedia Commons), shown until someone takes a real photo.
+   Each phone looks these up once and remembers them. */
+const MODEL_ARTICLES={"civic-type-r":"Honda_Civic_Type_R","civic":"Honda_Civic_(eleventh_generation)","accord":"Honda_Accord_(eleventh_generation)",
+  "cr-v":"Honda_CR-V_(sixth_generation)","hr-v":"Honda_HR-V","pilot":"Honda_Pilot","passport":"Honda_Passport",
+  "odyssey":"Honda_Odyssey_(North_America)","ridgeline":"Honda_Ridgeline","prologue":"Honda_Prologue"};
+function modelKey(c){
+  if (c.make && !/^honda$/i.test(c.make)) return null;
+  const m=((c.model||"")+" "+(c.trim||"")).toLowerCase();
+  if (/type\s*-?r\b/.test(m)) return "civic-type-r";
+  for (const [k,re] of [["civic",/civic/],["accord",/accord/],["cr-v",/cr-?v/],["hr-v",/hr-?v/],["pilot",/pilot/],["passport",/passport/],["odyssey",/odyssey/],["ridgeline",/ridgeline/],["prologue",/prologue/]]) if (re.test(m)) return k;
+  return null;
+}
+const STOCK_KEY="lotlocator:stockimg:v1"; let stockImgs={}; try{ stockImgs=JSON.parse(localStorage.getItem(STOCK_KEY)||"{}")||{}; }catch{}
+const stockPending=new Set();
+async function ensureStockImgs(keys){
+  const need=[...new Set(keys.filter(k=>k && MODEL_ARTICLES[k] && !stockImgs[k] && !stockPending.has(k)))];
+  if (!need.length) return;
+  need.forEach(k=>stockPending.add(k));
+  let changed=false;
+  for (const k of need){
+    try{
+      const r=await fetch("https://en.wikipedia.org/api/rest_v1/page/summary/"+encodeURIComponent(MODEL_ARTICLES[k]));
+      if (r.ok){
+        const s=await r.json(), orig=s.originalimage||{}, th=s.thumbnail||{};
+        const small=th.source||orig.source;
+        if (small){
+          const big=(th.source && (orig.width||0)>960) ? th.source.replace(/\/\d+px-/,"/960px-") : (orig.source||small);
+          const file=(orig.source||small).split("/").pop().replace(/^\d+px-/,"");
+          stockImgs[k]={small, big, page:"https://commons.wikimedia.org/wiki/File:"+file};
+          changed=true;
+        }
+      }
+    }catch{}
+    // leave failures unremembered so the next visit tries again
+  }
+  if (changed){ try{ localStorage.setItem(STOCK_KEY, JSON.stringify(stockImgs)); }catch{} queueRender(); }
+}
+const stockFor = c => { const k=modelKey(c); return k ? stockImgs[k] : null; };
+
 function thumb(c){
   const box = el("span",{class:"thumb","aria-hidden":"true"});
   const u = c.photo && photoUrls[c.photo];
+  const st = !u && stockFor(c);
   if (u) box.append(el("img",{src:u,alt:"",loading:"lazy"}));
+  else if (st){ box.classList.add("stock"); box.append(el("img",{src:st.small,alt:"",loading:"lazy",referrerpolicy:"no-referrer"})); }
   else box.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
   return box;
 }
@@ -118,6 +159,7 @@ function render(){
     return;
   }
   ensurePhotoUrls(rows.slice(0,300).map(c=>c.photo));
+  ensureStockImgs(rows.filter(c=>!c.photo).map(modelKey));
   list.replaceChildren(...rows.map(c=>{
     const stale = c.updatedAt && Date.now()-c.updatedAt>STALE_MS && c.area!=="SHW";
     return el("li",{}, el("button",{class:"car withthumb",type:"button",onclick:()=>openCar(c.id)},
@@ -186,7 +228,14 @@ async function openCar(id){
     c.photo && photoUrls[c.photo]
       ? el("div",{class:"photo"}, el("img",{src:photoUrls[c.photo],alt:`Photo of ${carName(c)}, stock #${c.stock}`}),
           el("button",{class:"btn",type:"button",onclick:()=>pickPhoto(f=>savePhoto(c,f))}, "Replace photo"))
-      : el("button",{class:"btn addphoto",type:"button",onclick:()=>pickPhoto(f=>savePhoto(c,f))}, scanIcon2(), "Add a photo of this car"),
+      : stockFor(c)
+        ? el("div",{class:"photo"},
+            el("div",{class:"stockwrap"},
+              el("img",{src:stockFor(c).big,alt:`Stock photo of a Honda ${c.model}`,referrerpolicy:"no-referrer",onerror:function(){ if(this.src!==stockFor(c).small) this.src=stockFor(c).small; }}),
+              el("span",{class:"stocktag",text:"Stock photo"})),
+            el("span",{class:"hint"}, "Model photo, not this car. ", el("a",{href:stockFor(c).page,target:"_blank",rel:"noopener"},"Source: Wikimedia Commons")),
+            el("button",{class:"btn",type:"button",onclick:()=>pickPhoto(f=>savePhoto(c,f))}, scanIcon2(), "Add a photo of this car"))
+        : el("button",{class:"btn addphoto",type:"button",onclick:()=>pickPhoto(f=>savePhoto(c,f))}, scanIcon2(), "Add a photo of this car"),
     el("div",{class:"now"}, sign(c.area), el("div",{}, el("b",{text:(AREA[c.area]?.name||"Not located yet")+(c.spot?" · "+c.spot:"")}),
       el("span",{text: c.updatedAt ? `Last parked ${ago(c.updatedAt)} by ${who(c.updatedBy)}${c.keys?" · Keys: "+c.keys:""}${c.note?" · "+c.note:""}` : "Not located yet. Set its spot the first time you see it."}))),
     el("div",{class:"field"}, el("span",{class:"label",text:"Where did you leave it?"}), areaPicker(area, v=>area=v)),
