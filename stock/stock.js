@@ -117,5 +117,14 @@ window.LOT_STOCK_PHOTOS = [
   "label": "2024+ Honda Prologue",
   "src": "stock/prologue-2024.jpg",
   "page": "https://commons.wikimedia.org/wiki/File:2024_Honda_Prologue_Elite_AWD_(United_States)_front_view.png"
+ },
+ {
+  "id": "pilot-2026",
+  "model": "pilot",
+  "from": 2026,
+  "to": 2030,
+  "label": "2026+ Honda Pilot",
+  "src": "stock/pilot-2026.jpg",
+  "page": "https://commons.wikimedia.org/wiki/File:2026_Honda_Pilot_Elite_in_Sonic_Gray_Pearl,_front_left.jpg"
  }
 ];
