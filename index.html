@@ -16,7 +16,7 @@
   --bg:#eceff2; --surface:#ffffff; --surface-2:#f5f7f9; --ink:#15191e; --muted:#5a636e; --line:#d3d8de;
   --accent:#f2b705; --accent-ink:#1d1700; --danger:#c2362b; --ok:#1f7a4a; --warn:#a86400;
   --scrim:rgba(10,14,20,.5);
-  --lv-LOT:#2f7d4f; --lv-SD:#11787a; --lv-B1:#2d5fb8; --lv-R1:#c4581a; --lv-R2:#7a4bb3; --lv-SHW:#b3324a; --lv-DET:#2c84a8; --lv-OUT:#5d6670;
+  --lv-LOT:#2f7d4f; --lv-UL:#8a6d1d; --lv-SD:#11787a; --lv-B1:#2d5fb8; --lv-R1:#c4581a; --lv-R2:#7a4bb3; --lv-SHW:#b3324a; --lv-DET:#2c84a8; --lv-OUT:#5d6670;
   --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
   --f-body:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
@@ -75,7 +75,8 @@ main .wrap{display:flex;flex-direction:column;gap:16px;padding-block:16px 48px}
 .filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .chip{height:32px;padding:0 12px;border-radius:999px;border:1.5px solid var(--line);background:var(--surface);font-size:13px;font-weight:600;cursor:pointer}
 .chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
-.filters select{height:32px;border-radius:999px;border:1.5px solid var(--line);background:var(--surface);padding:0 10px;font-size:13px;margin-left:auto}
+.filters select{height:32px;border-radius:999px;border:1.5px solid var(--line);background:var(--surface);padding:0 10px;font-size:13px}
+#brand{margin-left:auto}
 
 .notice{padding:10px 12px;border-radius:var(--r);background:var(--surface);border:1px dashed var(--line);color:var(--muted);font-size:13px}
 .notice.warn{border-style:solid;border-color:var(--warn);color:var(--ink)}
@@ -165,6 +166,15 @@ body{margin:0;padding-bottom:env(safe-area-inset-bottom,0px)}
 .photo img{width:100%;max-height:300px;object-fit:cover;border-radius:var(--r);border:1px solid var(--line);background:var(--surface-2)}
 .photo .btn{align-self:flex-start}
 .btn.addphoto{height:64px;border-style:dashed;color:var(--muted);width:100%}
+.scanner{position:fixed;inset:0;z-index:40;background:#000;color:#fff}
+.scanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.sc-frame{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.sc-box{position:relative;width:min(90vw,560px);aspect-ratio:5/2;border:3px solid var(--accent);border-radius:12px;box-shadow:0 0 0 100vmax rgba(0,0,0,.45)}
+.sc-line{position:absolute;left:4%;right:4%;top:50%;height:2px;background:var(--accent);opacity:.85}
+.sc-top{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));right:calc(12px + env(safe-area-inset-right,0px))}
+.sc-bottom{position:absolute;left:0;right:0;bottom:0;padding:24px max(16px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px;align-items:center;background:linear-gradient(transparent,rgba(0,0,0,.75))}
+.sc-hint{font-weight:600;font-size:16px;text-align:center;text-shadow:0 1px 3px #000;max-width:40ch}
+.scanner .btn,.scanner .x{background:rgba(255,255,255,.94);color:#111;border-color:transparent}
 @media (max-width:440px){.car.withthumb{grid-template-columns:52px minmax(0,1fr) auto}.thumb{width:52px;height:40px}}
 </style>
 </head>
@@ -202,6 +212,7 @@ body{margin:0;padding-bottom:env(safe-area-inset-bottom,0px)}
       <button class="chip" data-type="Used" aria-pressed="false" type="button">Used</button>
       <button class="chip" data-type="Service" aria-pressed="false" type="button">Service</button>
       <button class="chip" data-type="Loaner" aria-pressed="false" type="button">Loaner</button>
+      <select id="brand" aria-label="Brand" hidden></select>
       <select id="sort" aria-label="Sort">
         <option value="recent">Recently moved</option>
         <option value="stock">Stock #</option>

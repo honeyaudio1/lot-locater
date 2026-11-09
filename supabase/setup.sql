@@ -123,3 +123,7 @@ create policy "team adds car photos" on storage.objects for insert
 drop policy if exists "team removes car photos" on storage.objects;
 create policy "team removes car photos" on storage.objects for delete
   using (bucket_id = 'car-photos' and public.my_role() in ('staff','manager'));
+
+-- Brand (make) for every car. Existing cars without one are Honda.
+alter table public.cars add column if not exists make text;
+update public.cars set make = 'Honda' where make is null or make = '';

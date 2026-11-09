@@ -1,12 +1,13 @@
 /* Lot Locator — standalone version (GitHub Pages + Supabase) */
 const AREAS = [
-  {code:"LOT", name:"Main Lot"}, {code:"SD", name:"Service Drive"}, {code:"B1", name:"Service Basement"},
+  {code:"LOT", name:"Main Lot"}, {code:"UL", name:"Used Lot"}, {code:"SD", name:"Service Drive"}, {code:"B1", name:"Service Basement"},
   {code:"R1", name:"Roof Level 1"}, {code:"R2", name:"Roof Level 2"}, {code:"SHW", name:"Showroom"},
   {code:"DET", name:"Detail / Wash"}, {code:"OUT", name:"Off-site / Out"}
 ];
 const AREA = Object.fromEntries(AREAS.map(a=>[a.code,a]));
 const TYPES = ["New","Used","Service","Loaner"];
 const MODELS = ["Accord","Accord Hybrid","Civic","Civic Hatchback","Civic Si","Civic Type R","CR-V","CR-V Hybrid","HR-V","Passport","Pilot","Odyssey","Ridgeline","Prologue"];
+const MAKES = ["Honda","Acura","Toyota","Lexus","Nissan","Infiniti","Mazda","Subaru","Hyundai","Kia","Ford","Chevrolet","GMC","Jeep","Ram","Dodge","Tesla","BMW","Mercedes-Benz","Audi","Volkswagen","Volvo","Mitsubishi"];
 const KEY_SPOTS = ["Key machine","Key board","In the car","Sales desk","Service desk","With me"];
 const STALE_MS = 3*24*3600e3;
 
@@ -14,19 +15,19 @@ const cfg = window.LOT_CONFIG || {};
 const configured = cfg.SUPABASE_URL && !/YOUR-/.test(cfg.SUPABASE_URL + cfg.SUPABASE_ANON_KEY);
 const sb = configured && window.supabase ? window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY) : null;
 
-const S = {me:null, people:{}, cars:[], loaded:false, q:"", area:"", type:"", sort:"recent", open:null, canEdit:false, readOnly:false};
+const S = {me:null, people:{}, cars:[], loaded:false, q:"", area:"", type:"", brand:"", sort:"recent", open:null, canEdit:false, readOnly:false};
 const $ = id => document.getElementById(id);
 const el = (tag, attrs={}, ...kids) => { const n=document.createElement(tag); for (const [k,v] of Object.entries(attrs)) { if (v==null||v===false) continue; if (k==="class") n.className=v; else if (k==="text") n.textContent=v; else if (k.startsWith("on")) n.addEventListener(k.slice(2),v); else n.setAttribute(k, v===true?"":v); } for (const c of kids.flat()) if (c!=null) n.append(c.nodeType?c:document.createTextNode(c)); return n; };
 const sign = code => { const a=AREA[code]; const s=el("span",{class:"sign",text:a?code:"?"}); s.style.background = a?`var(--lv-${code})`:"var(--lv-OUT)"; return s; };
 const ago = t => { if(!t) return "never"; const s=(Date.now()-t)/1000; if(s<60) return "just now"; if(s<3600) return Math.floor(s/60)+"m ago"; if(s<86400) return Math.floor(s/3600)+"h ago"; return Math.floor(s/86400)+"d ago"; };
 const when = t => new Date(t).toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
-const carName = c => [c.year, c.model, c.trim].filter(Boolean).join(" ") || "Vehicle";
+const carName = c => [c.year, c.make, c.model, c.trim].filter(Boolean).join(" ") || "Vehicle";
 let toastT; const toast = m => { const t=$("toast"); t.textContent=m; t.hidden=false; clearTimeout(toastT); toastT=setTimeout(()=>t.hidden=true,2600); };
 function busy(m){ const t=$("toast"); clearTimeout(toastT); if(m){ t.textContent=m; t.hidden=false; } else t.hidden=true; }
 const who = id => !id ? "Someone" : (id===S.me?.id ? "You" : (S.people[id]?.name || S.people[id]?.email || "A teammate"));
 const must = async q => { const {data, error} = await q; if (error) throw error; return data; };
 
-const fromRow = r => ({id:r.id, stock:r.stock, vin:r.vin||"", year:r.year, model:r.model||"", trim:r.trim_level||"", color:r.color||"", type:r.type||"",
+const fromRow = r => ({id:r.id, stock:r.stock, vin:r.vin||"", year:r.year, make:r.make||"", model:r.model||"", trim:r.trim_level||"", color:r.color||"", type:r.type||"",
   area:r.area||"", spot:r.spot||"", keys:r.keys||"", note:r.note||"", updatedAt:r.updated_at?Date.parse(r.updated_at):null, updatedBy:r.updated_by, photo:r.photo_path||""});
 
 /* ---------- photos ---------- */
@@ -71,14 +72,15 @@ async function savePhoto(c, file){
     if (S.open?.kind==="car" && S.open.id===c.id){ await ensurePhotoUrls([path]); openCar(c.id); }
   }catch(e){ busy(null); toast(e==="denied"||/security|permission/i.test(String(e&&e.message))?"You don't have permission to add photos. Ask a manager.":"Couldn't upload the photo. Check your connection and try again."); }
 }
-const detailsRow = d => ({stock:d.stock, vin:d.vin, year:d.year, model:d.model, trim_level:d.trim, color:d.color, type:d.type});
+const detailsRow = d => ({stock:d.stock, vin:d.vin, year:d.year, make:d.make||null, model:d.model, trim_level:d.trim, color:d.color, type:d.type});
 
 /* ---------- main list ---------- */
 function matches(c){
   if (S.area==="NONE" ? !!c.area : (S.area && c.area!==S.area)) return false;
   if (S.type && c.type!==S.type) return false;
+  if (S.brand && (c.make||"Unknown")!==S.brand) return false;
   if (!S.q) return true;
-  const hay = [c.stock,c.vin,c.year,c.model,c.trim,c.color,c.spot,c.keys,c.note,AREA[c.area]?.name].join(" ").toLowerCase();
+  const hay = [c.stock,c.vin,c.year,c.make,c.model,c.trim,c.color,c.spot,c.keys,c.note,AREA[c.area]?.name].join(" ").toLowerCase();
   return S.q.toLowerCase().split(/\s+/).filter(Boolean).every(w=>hay.includes(w));
 }
 let rq; const queueRender = () => { clearTimeout(rq); rq=setTimeout(render,120); };
@@ -89,6 +91,10 @@ function render(){
       sign(a.code), el("span",{class:"t"}, el("b",{text:a.name}), el("span",{text:(counts[a.code]||0)+" car"+((counts[a.code]||0)===1?"":"s")})))),
     ...(none||S.area==="NONE" ? [el("button",{class:"lvl",type:"button","aria-pressed":String(S.area==="NONE"),onclick:()=>{S.area=S.area==="NONE"?"":"NONE";render();}},
       sign("NONE"), el("span",{class:"t"}, el("b",{text:"Not located yet"}), el("span",{text:none+" car"+(none===1?"":"s")})))] : []));
+  const brands=[...new Set(S.cars.map(c=>c.make||"Unknown"))].sort();
+  const bsel=$("brand"); const cur=S.brand;
+  bsel.replaceChildren(el("option",{value:""},"All brands"), ...brands.map(b=>el("option",{value:b,selected:b===cur},`${b} (${S.cars.filter(c=>(c.make||"Unknown")===b).length})`)));
+  bsel.hidden = brands.length<1;
   document.querySelectorAll("#filters .chip").forEach(b=>b.setAttribute("aria-pressed", String(b.dataset.type===S.type)));
   $("tools").hidden = !S.canEdit;
 
@@ -204,6 +210,7 @@ function openForm(c, pre={}){
   const stock = el("input",{id:"f-stock",type:"text",value:c.stock||"",autocomplete:"off",placeholder:"e.g. H24581",class:"mono"});
   const vin = el("input",{id:"f-vin",type:"text",value:c.vin||"",autocomplete:"off",placeholder:"17 characters (optional)",maxlength:"17",class:"mono"});
   const year = el("input",{id:"f-year",type:"number",inputmode:"numeric",value:c.year||"",placeholder:String(new Date().getFullYear()+1)});
+  const make = el("input",{id:"f-make",type:"text",value:c.make||(isNew?"Honda":""),list:"makes",autocomplete:"off",placeholder:"Honda"});
   const model = el("input",{id:"f-model",type:"text",value:c.model||"",list:"models",autocomplete:"off",placeholder:"CR-V"});
   const trim = el("input",{id:"f-trim",type:"text",value:c.trim||"",autocomplete:"off",placeholder:"EX-L"});
   const color = el("input",{id:"f-color",type:"text",value:c.color||"",autocomplete:"off",placeholder:"Platinum White Pearl"});
@@ -229,7 +236,7 @@ function openForm(c, pre={}){
     if (S.cars.some(x=>String(x.stock).toUpperCase()===s && x.id!==c.id)){ err.textContent=`Stock #${s} is already on the board. Search for it instead.`; return; }
     if (isNew && !area){ err.textContent="Pick where the car is parked."; return; }
     save.disabled=true; err.textContent="";
-    const details = detailsRow({stock:s, vin:vin.value.trim().toUpperCase(), year:year.value?Number(year.value):null, model:model.value.trim(), trim:trim.value.trim(), color:color.value.trim(), type:type.value});
+    const details = detailsRow({stock:s, vin:vin.value.trim().toUpperCase(), year:year.value?Number(year.value):null, make:make.value.trim(), model:model.value.trim(), trim:trim.value.trim(), color:color.value.trim(), type:type.value});
     try{
       if (isNew){
         const d = await must(sb.from("cars").insert({...details, area, spot:spot.value.trim(), updated_at:new Date().toISOString(), updated_by:S.me.id}).select());
@@ -252,7 +259,9 @@ function openForm(c, pre={}){
       el("button",{class:"x",type:"button","aria-label":"Close",onclick:()=>isNew?closeSheet():openCar(c.id)},"×")),
     el("div",{class:"grid2"}, f("f-stock","Stock #",withScan(stock)), f("f-type","Type",type)),
     el("div",{class:"field"}, el("label",{class:"label",for:"f-vin",text:"VIN"}), withScan(vin), vinNote),
-    el("div",{class:"grid2"}, f("f-year","Year",year), f("f-model","Model",model)),
+    el("div",{class:"grid2"}, f("f-year","Year",year), f("f-make","Brand",make)),
+    f("f-model","Model",model),
+    datalist("makes",MAKES),
     el("div",{class:"grid2"}, f("f-trim","Trim",trim), f("f-color","Color",color)),
     datalist("models",MODELS),
     isNew ? el("div",{class:"field"}, el("span",{class:"label",text:"Where is it parked?"}), areaPicker(area,v=>area=v)) : null,
@@ -298,14 +307,93 @@ async function decodeBarcode(bmp){
     const sc=Math.min(1,max/Math.max(bmp.width,bmp.height));
     const cv=document.createElement("canvas"); cv.width=Math.round(bmp.width*sc); cv.height=Math.round(bmp.height*sc);
     cv.getContext("2d").drawImage(bmp,0,0,cv.width,cv.height);
-    try{ const res=zx.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(cv))), zxHints); const t=res&&res.getText(); if(t) return t; }catch{}
-    finally{ try{ zx.reset(); }catch{} }
+    const t=decodeCanvas(cv); if(t) return t;
     await new Promise(r=>setTimeout(r,0));
   }
   return null;
 }
+function decodeCanvas(cv){
+  const Z=window.ZXing; if(!Z) return null;
+  if(!zx){ zxHints=new Map(); const F=Z.BarcodeFormat;
+    zxHints.set(Z.DecodeHintType.POSSIBLE_FORMATS,[F.CODE_39,F.CODE_128,F.DATA_MATRIX,F.QR_CODE,F.PDF_417]);
+    zxHints.set(Z.DecodeHintType.TRY_HARDER,true); zx=new Z.MultiFormatReader(); }
+  try{ const res=zx.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(cv))), zxHints); return (res&&res.getText())||null; }
+  catch{ return null; }
+  finally{ try{ zx.reset(); }catch{} }
+}
+async function makeDetector(){
+  try{
+    if(!("BarcodeDetector" in window)) return null;
+    const have=await BarcodeDetector.getSupportedFormats();
+    if(!have.includes("code_39")) return null; // door-jamb VIN barcodes are Code 39
+    return new BarcodeDetector({formats:["code_39","code_128","data_matrix","qr_code","pdf417"].filter(f=>have.includes(f))});
+  }catch{ return null; }
+}
 let scanCb=null;
-function startScan(cb){ scanCb=cb; const i=$("cam"); i.value=""; i.click(); }
+function photoScan(cb){ scanCb=cb; const i=$("cam"); i.value=""; i.click(); }
+function startScan(cb){ if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) openScanner(cb); else photoScan(cb); }
+
+/* Live camera scanner: reads continuously from the video, inside the on-screen box. */
+async function openScanner(cb){
+  const video=el("video",{playsinline:true,autoplay:true,muted:true}); video.muted=true;
+  const hint=el("div",{class:"sc-hint",role:"status",text:"Starting camera…"});
+  const torchBtn=el("button",{class:"btn",type:"button",hidden:true},"Flashlight");
+  let stream=null, running=true, timer=null, last=null, lastCount=0;
+  const close=(result)=>{ running=false; clearTimeout(timer); if(stream) stream.getTracks().forEach(t=>t.stop()); root.remove(); document.removeEventListener("keydown",onKey); if(result) cb(result); };
+  const onKey=e=>{ if(e.key==="Escape") close(null); };
+  const root=el("div",{class:"scanner",role:"dialog","aria-modal":"true","aria-label":"Barcode scanner"},
+    video,
+    el("div",{class:"sc-frame"}, el("div",{class:"sc-box"}, el("span",{class:"sc-line"}))),
+    el("div",{class:"sc-top"}, el("button",{class:"x",type:"button","aria-label":"Close scanner",onclick:()=>close(null)},"×")),
+    el("div",{class:"sc-bottom"}, hint,
+      el("div",{class:"actions",style:"justify-content:center"}, torchBtn,
+        el("button",{class:"btn",type:"button",onclick:()=>{ close(null); photoScan(cb); }},"Use a photo instead"))));
+  document.body.append(root); document.addEventListener("keydown",onKey);
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:false, video:{facingMode:{ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080}}});
+  }catch(e){
+    hint.textContent = e && e.name==="NotAllowedError"
+      ? "Camera access is blocked. Allow the camera for this site in your browser settings, or use a photo instead."
+      : "Couldn't start the camera. Use a photo instead.";
+    return;
+  }
+  if(!running){ stream.getTracks().forEach(t=>t.stop()); return; }
+  video.srcObject=stream; try{ await video.play(); }catch{}
+  const track=stream.getVideoTracks()[0];
+  try{
+    const caps=(track.getCapabilities&&track.getCapabilities())||{};
+    if(caps.focusMode && caps.focusMode.includes("continuous")) await track.applyConstraints({advanced:[{focusMode:"continuous"}]});
+    if(caps.torch){ torchBtn.hidden=false; let on=false;
+      torchBtn.onclick=async()=>{ on=!on; try{ await track.applyConstraints({advanced:[{torch:on}]}); torchBtn.textContent=on?"Flashlight off":"Flashlight"; }catch{} }; }
+  }catch{}
+  hint.textContent="Hold the VIN or stock barcode inside the box";
+  const detector=await makeDetector();
+  const cv=document.createElement("canvas"), ctx=cv.getContext("2d",{willReadFrequently:true});
+  let n=0;
+  const tick=async()=>{
+    if(!running) return;
+    if(video.readyState>=2 && video.videoWidth){
+      // Cycle: straight crop, crop turned +5°, crop turned -5°, whole frame. Hands are rarely level.
+      const vw=video.videoWidth, vh=video.videoHeight, mode=n++%4, full=(mode===3);
+      const cw=full?vw:Math.round(vw*0.9), ch=full?vh:Math.round(Math.min(vh, cw*0.4));
+      cv.width=cw; cv.height=ch;
+      const ang=mode===1?5:mode===2?-5:0;
+      ctx.setTransform(1,0,0,1,cw/2,ch/2); ctx.rotate(ang*Math.PI/180); ctx.drawImage(video,-vw/2,-vh/2); ctx.setTransform(1,0,0,1,0,0);
+      let text=null;
+      try{ text = detector ? ((await detector.detect(cv))[0]||{}).rawValue||null : decodeCanvas(cv); }catch{}
+      if(!text && detector && n%6===0) text=decodeCanvas(cv);
+      const r=text?classify(text):null;
+      if(r){
+        const key=r.vin||r.stock;
+        if(key===last) lastCount++; else { last=key; lastCount=1; }
+        // A VIN with a valid check digit is accepted at once; anything else must read the same twice.
+        if((r.vin && vinCheck(r.vin)) || lastCount>=2){ try{ navigator.vibrate&&navigator.vibrate(80); }catch{} hint.textContent="Got it: "+key; close(r); return; }
+      }
+    }
+    timer=setTimeout(tick, detector?60:100);
+  };
+  tick();
+}
 $("cam").addEventListener("change", async e=>{
   const f=e.target.files&&e.target.files[0]; const cb=scanCb; scanCb=null; if(!f||!cb) return;
   busy("Reading barcode…");
@@ -336,9 +424,9 @@ function showScanResult(r){
 }
 
 /* ---------- inventory import (managers) ---------- */
-const FIELDS=[{k:"stock",label:"Stock # (required)"},{k:"vin",label:"VIN"},{k:"year",label:"Year"},{k:"model",label:"Model"},{k:"trim",label:"Trim"},{k:"color",label:"Color"},{k:"type",label:"New / Used"}];
+const FIELDS=[{k:"stock",label:"Stock # (required)"},{k:"vin",label:"VIN"},{k:"year",label:"Year"},{k:"make",label:"Brand / Make"},{k:"model",label:"Model"},{k:"trim",label:"Trim"},{k:"color",label:"Color"},{k:"type",label:"New / Used"}];
 const PREFS={stock:[/^stock\s*(#|no\.?|num(ber)?)?$/i,/stock|^stk/i], vin:[/^vin$/i,/vin|serial/i], year:[/^(model\s*)?(year|yr)$/i,/^my$/i,/year/i],
-  model:[/^model$/i,/model\s*(desc|description|name)/i,/^model(?!.*(year|code|no|#))/i], trim:[/trim/i,/series|style/i],
+  make:[/^make$/i,/^(brand|manufacturer|mfr)$/i,/make|brand/i], model:[/^model$/i,/model\s*(desc|description|name)/i,/^model(?!.*(year|code|no|#))/i], trim:[/trim/i,/series|style/i],
   color:[/ext.*colou?r|exterior/i,/^colou?r$/i,/colou?r/i], type:[/new.*used|^n\s*\/\s*u$/i,/^(type|status|class|category|n\/u|nu)$/i]};
 function guessMap(headers){
   const m={}, used=new Set();
@@ -362,7 +450,9 @@ function buildRecords(p,map,defType){
     if(!stock || /^(TOTAL|COUNT)/.test(stock)){ skipped++; continue; }
     let vin=g("vin").toUpperCase().replace(/[^A-Z0-9]/g,""); if(vin.length===18&&vin[0]==="I") vin=vin.slice(1);
     let year=parseInt(g("year"),10); if(!(year>1980&&year<2100)) year=vinYear(vin);
-    out.set(stock,{stock, vin, year:year||null, model:g("model"), trim:g("trim"), color:g("color"), type:normType(g("type"))||defType});
+    let make=g("make").toLowerCase().replace(/(^|[\s-])\w/g,m=>m.toUpperCase()); // "HONDA" -> "Honda"
+    if(!make && /^(1HG|2HG|3HG|5FN|5J6|7FA|19X|JHM|SHH|3CZ|2HK|5KB|JHL)/.test(vin)) make="Honda";
+    out.set(stock,{stock, vin, year:year||null, make, model:g("model"), trim:g("trim"), color:g("color"), type:normType(g("type"))||defType});
   }
   return {recs:[...out.values()], skipped};
 }
@@ -401,7 +491,7 @@ async function openImport(file){
       `${built.recs.length} cars found: ${fresh} new to the board, ${built.recs.length-fresh} already on it (details refreshed, locations kept).${built.skipped?` ${built.skipped} rows skipped with no stock #.`:""}`;
     rmText.textContent = `Also remove the ${missing.length} New/Used car${missing.length===1?"":"s"} on the board that aren't in this file (sold or wholesaled). Service and loaner cars are never removed.`;
     rmRow.hidden = !missing.length || map.stock==null;
-    preview.replaceChildren(...built.recs.slice(0,4).map(r=>el("li",{text:`#${r.stock} · ${[r.year,r.model,r.trim].filter(Boolean).join(" ")||"(no model)"}${r.color?" · "+r.color:""} · ${r.type}${r.vin?" · VIN …"+r.vin.slice(-6):""}`})));
+    preview.replaceChildren(...built.recs.slice(0,4).map(r=>el("li",{text:`#${r.stock} · ${[r.year,r.make,r.model,r.trim].filter(Boolean).join(" ")||"(no model)"}${r.color?" · "+r.color:""} · ${r.type}${r.vin?" · VIN …"+r.vin.slice(-6):""}`})));
     go.disabled = map.stock==null || !built.recs.length;
     go.textContent = `Import ${built.recs.length} cars`;
   };
@@ -415,7 +505,7 @@ async function openImport(file){
       const ex=bySt.get(r.stock);
       if (ex){
         const upd={};
-        for (const [k,col] of [["vin","vin"],["year","year"],["model","model"],["trim","trim_level"],["color","color"]]) if(r[k] && r[k]!==ex[k]) upd[col]=r[k];
+        for (const [k,col] of [["vin","vin"],["year","year"],["make","make"],["model","model"],["trim","trim_level"],["color","color"]]) if(r[k] && r[k]!==ex[k]) upd[col]=r[k];
         if (map.type!=null && r.type!==ex.type && (ex.type==="New"||ex.type==="Used")) upd.type=r.type;
         if (Object.keys(upd).length) jobs.push(async()=>{ const d=await must(sb.from("cars").update(upd).eq("id",ex.id).select()); if(!d.length) throw "denied"; upsertLocal(d[0]); updated++; });
       } else inserts.push(detailsRow(r));
@@ -560,6 +650,7 @@ async function enter(session){
 /* ---------- controls + boot ---------- */
 $("q").addEventListener("input",e=>{S.q=e.target.value.trim();render();});
 $("sort").addEventListener("change",e=>{S.sort=e.target.value;render();});
+$("brand").addEventListener("change",e=>{S.brand=e.target.value;render();});
 $("filters").addEventListener("click",e=>{const b=e.target.closest(".chip"); if(!b) return; S.type=b.dataset.type; render();});
 $("addBtn").addEventListener("click",()=>openForm(null));
 $("scanBtn").addEventListener("click", scanLookup);
