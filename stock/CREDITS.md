@@ -1,0 +1,19 @@
+# Stock photo credits
+
+Stock photos in Lot Locator come from Wikimedia Commons and are used under the licenses below. Each is resized to 960px. Each car card links to the original file page.
+
+| Photo | Shown for | Photographer | License | Source |
+| --- | --- | --- | --- | --- |
+| civic-2022.jpg | 2022–2024 Honda Civic sedan | SsmIntrigue | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | [2022 Honda Civic Sport, Front Right, 06-20-2021.jpg](https://commons.wikimedia.org/wiki/File:2022_Honda_Civic_Sport,_Front_Right,_06-20-2021.jpg) |
+| civic-2025.jpg | 2025+ Honda Civic sedan | Elise240SX | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | [2025 Honda Civic Sport Touring Hybrid in Blue Lagoon, front left, 2024-09-24.jpg](https://commons.wikimedia.org/wiki/File:2025_Honda_Civic_Sport_Touring_Hybrid_in_Blue_Lagoon,_front_left,_2024-09-24.jpg) |
+| civic-hatchback-2022.jpg | 2022–2024 Honda Civic hatchback | Alexander-93 | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | [Honda Civic Hybrid (2022, Europe) IAA 2023 1X7A0545 (2).jpg](https://commons.wikimedia.org/wiki/File:Honda_Civic_Hybrid_(2022,_Europe)_IAA_2023_1X7A0545_(2).jpg) |
+| civic-type-r-2023.jpg | 2023+ Honda Civic Type R | Calreyn88 | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | [Honda Civic Type R 2023 FL5.jpg](https://commons.wikimedia.org/wiki/File:Honda_Civic_Type_R_2023_FL5.jpg) |
+| accord-2023.jpg | 2023+ Honda Accord | Charles from Port Chester, New York | [CC BY 2.0](https://creativecommons.org/licenses/by/2.0) | [Honda Accord Touring Hybrid (2024) (53625361444).jpg](https://commons.wikimedia.org/wiki/File:Honda_Accord_Touring_Hybrid_(2024)_(53625361444).jpg) |
+| cr-v-2023.jpg | 2023+ Honda CR-V | MercurySable99 | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | [2023 Honda CR-V EX-L AWD, front right.jpg](https://commons.wikimedia.org/wiki/File:2023_Honda_CR-V_EX-L_AWD,_front_right.jpg) |
+| hr-v-2023.jpg | 2023+ Honda HR-V | Elise240SX | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | [2023 Honda HR-V EX-L in Nordic Forest Pearl, Front Right, 10-15-2022.jpg](https://commons.wikimedia.org/wiki/File:2023_Honda_HR-V_EX-L_in_Nordic_Forest_Pearl,_Front_Right,_10-15-2022.jpg) |
+| pilot-2023.jpg | 2023–2025 Honda Pilot | HJUdall | [CC0](http://creativecommons.org/publicdomain/zero/1.0/deed.en) | [24 Honda Pilot EX-L.jpg](https://commons.wikimedia.org/wiki/File:24_Honda_Pilot_EX-L.jpg) |
+| passport-2026.jpg | 2026+ Honda Passport | MercurySable99 | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | [2026 Honda Passport RTL, front right, 06-07-2025.jpg](https://commons.wikimedia.org/wiki/File:2026_Honda_Passport_RTL,_front_right,_06-07-2025.jpg) |
+| odyssey-2018.jpg | 2018–2024 Honda Odyssey | Kevauto | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | [2018_Honda_Odyssey_Touring_3.5L,_front_8.18.19.jpg](https://commons.wikimedia.org/wiki/File:2018_Honda_Odyssey_Touring_3.5L,_front_8.18.19.jpg) |
+| odyssey-2025.jpg | 2025+ Honda Odyssey | Deathpallie325 | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0) | [2025 Honda Odyssey front view.jpg](https://commons.wikimedia.org/wiki/File:2025_Honda_Odyssey_front_view.jpg) |
+| ridgeline-2021.jpg | 2021+ Honda Ridgeline | Elise240SX | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | [2022_Honda_Ridgeline_Touring_in_Sonic_Gray_Pearl,_front_left,_2024-05-11.jpg](https://commons.wikimedia.org/wiki/File:2022_Honda_Ridgeline_Touring_in_Sonic_Gray_Pearl,_front_left,_2024-05-11.jpg) |
+| prologue-2024.jpg | 2024+ Honda Prologue | Autosdeprimera | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0) | [2024 Honda Prologue Elite AWD (United States) front view.png](https://commons.wikimedia.org/wiki/File:2024_Honda_Prologue_Elite_AWD_(United_States)_front_view.png) |
