@@ -374,7 +374,8 @@ async function getOcr(){
 // Pull a VIN out of what the text reader saw. Strict on purpose, because about 1 in 11 random strings
 // passes the VIN check digit. Only two real layouts count:
 //   - a line that IS the VIN (windshield plate): 17 characters, or 18 with one stray edge character;
-//   - the 17 characters right after the word "VIN" (door-jamb label).
+//   - the 17 characters right after the word "VIN" (door-jamb label);
+//   - one word of 17 characters the reader is at least 70% sure of (windshield plate among clutter).
 // The 10th character must be a real model-year code, and two different candidates in one frame = no answer.
 const YEAR_CODES = "ABCDEFGHJKLMNPRSTVWXY123456789";
 const vinOk = v => VIN_RE.test(v) && vinCheck(v) && YEAR_CODES.includes(v[9]) && !/^0/.test(v);
@@ -390,6 +391,12 @@ function vinFromOcr(data){
     const m = t.match(/V[I1]?N([A-Z0-9]{17})/);
     if (m) cands.push(m[1]);
     for (const v of cands) if (vinOk(v)) found.add(v);
+  }
+  // A VIN read as ONE word with high confidence (windshield plate among dashboard clutter, door label).
+  for (const w of ((data && data.words) || [])){
+    if ((w.confidence||0) < 70) continue;
+    const t=String(w.text||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    for (const v of (t.length===17 ? [t] : t.length===18 ? [t.slice(1), t.slice(0,17)] : [])) if (vinOk(v)) found.add(v);
   }
   return found.size===1 ? [...found][0] : null;
 }
@@ -428,6 +435,7 @@ async function openScanner(cb){
   const video=el("video",{playsinline:true,autoplay:true,muted:true}); video.muted=true;
   const hint=el("div",{class:"sc-hint",role:"status",text:"Starting camera…"});
   const torchBtn=el("button",{class:"btn",type:"button",hidden:true},"Flashlight");
+  const zoomBtn=el("button",{class:"btn",type:"button",hidden:true},"Zoom 2×");
   let stream=null, running=true, timer=null, last=null, lastCount=0;
   const close=(result)=>{ running=false; clearTimeout(timer); if(stream) stream.getTracks().forEach(t=>t.stop()); root.remove(); document.removeEventListener("keydown",onKey); if(result) cb(result); };
   const onKey=e=>{ if(e.key==="Escape") close(null); };
@@ -436,7 +444,7 @@ async function openScanner(cb){
     el("div",{class:"sc-frame"}, el("div",{class:"sc-box"}, el("span",{class:"sc-line"}))),
     el("div",{class:"sc-top"}, el("button",{class:"x",type:"button","aria-label":"Close scanner",onclick:()=>close(null)},"×")),
     el("div",{class:"sc-bottom"}, hint,
-      el("div",{class:"actions",style:"justify-content:center"}, torchBtn,
+      el("div",{class:"actions",style:"justify-content:center"}, zoomBtn, torchBtn,
         el("button",{class:"btn",type:"button",onclick:()=>{ close(null); photoScan(cb); }},"Use a photo instead"))));
   document.body.append(root); document.addEventListener("keydown",onKey);
   try{
@@ -453,6 +461,8 @@ async function openScanner(cb){
   try{
     const caps=(track.getCapabilities&&track.getCapabilities())||{};
     if(caps.focusMode && caps.focusMode.includes("continuous")) await track.applyConstraints({advanced:[{focusMode:"continuous"}]});
+    if(caps.zoom && caps.zoom.max>1){ zoomBtn.hidden=false; let z=false;
+      zoomBtn.onclick=async()=>{ z=!z; try{ await track.applyConstraints({advanced:[{zoom: z?Math.min(caps.zoom.max,2):(caps.zoom.min||1)}]}); zoomBtn.textContent=z?"Zoom out":"Zoom 2×"; }catch{} }; }
     if(caps.torch){ torchBtn.hidden=false; let on=false;
       torchBtn.onclick=async()=>{ on=!on; try{ await track.applyConstraints({advanced:[{torch:on}]}); torchBtn.textContent=on?"Flashlight off":"Flashlight"; }catch{} }; }
   }catch{}
@@ -476,6 +486,7 @@ async function openScanner(cb){
       if(r){
         const key=r.vin||r.stock;
         if(key===last) lastCount++; else { last=key; lastCount=1; }
+        hint.textContent="Reading "+key+"… hold still";
         // A VIN with a valid check digit is accepted at once; anything else must read the same twice.
         // Accept at once only if it matches a car already on the board; otherwise it must read the same twice in a row.
         if(findCar(r) || lastCount>=2){ try{ navigator.vibrate&&navigator.vibrate(80); }catch{} hint.textContent="Got it: "+key; close(r); return; }
@@ -502,6 +513,7 @@ async function openScanner(cb){
         if(v){
           // Printed text: accept a VIN already on the board at once; a new VIN must be read twice.
           ocrSeen[v]=(ocrSeen[v]||0)+1;
+          hint.textContent="Reading "+v+"… hold still";
           if(findCar({vin:v}) || ocrSeen[v]>=2){ succeed(v); return; }
         }
       } else await new Promise(r=>setTimeout(r,150));
@@ -512,9 +524,44 @@ $("cam").addEventListener("change", async e=>{
   const f=e.target.files&&e.target.files[0]; const cb=scanCb; scanCb=null; if(!f||!cb) return;
   busy("Reading barcode…");
   let bmp; try{ bmp=await createImageBitmap(f); }catch{ busy(null); toast("Couldn't open that photo. Try again."); return; }
-  const txt=await decodeBarcode(bmp);
-  busy(null); cb(txt?classifyBarcode(txt):null);
+  let res=null;
+  // Cheapest first: a quick barcode read, then the printed VIN, then a slower full-detail barcode search.
+  const quick=await decodeBarcode(bmp); if(quick) res=classifyBarcode(quick);
+  if(!res){ try{ const v=await vinFromPhoto(bmp, (i,n)=>busy(`Reading the VIN (${i} of ${n})…`)); if(v) res={vin:v}; }catch{} }
+  if(!res){ busy("Looking for a barcode…"); const txt=await decodeBarcodePhoto(bmp); if(txt) res=classifyBarcode(txt); }
+  busy(null); cb(res);
 });
+// A phone photo is ~12 megapixels; shrinking it whole makes a door-jamb barcode too small to read.
+// So also try overlapping pieces of the photo at full detail.
+const PHOTO_TILES=[[0,0,1,1],[0.2,0.2,0.6,0.6],[0,0,0.6,0.6],[0.4,0,0.6,0.6],[0,0.4,0.6,0.6],[0.4,0.4,0.6,0.6],[0,0,1,0.4],[0,0.3,1,0.4],[0,0.6,1,0.4]];
+function cropBitmap(bmp,[fx,fy,fw,fh],maxSide,rot90){
+  const sw=Math.round(bmp.width*fw), sh=Math.round(bmp.height*fh), sx=Math.round(bmp.width*fx), sy=Math.round(bmp.height*fy);
+  const sc=Math.min(1,maxSide/Math.max(sw,sh)), w=Math.round(sw*sc), h=Math.round(sh*sc);
+  const cv=document.createElement("canvas"); const g=cv.getContext("2d",{willReadFrequently:true});
+  if(rot90){ cv.width=h; cv.height=w; g.translate(h,0); g.rotate(Math.PI/2); } else { cv.width=w; cv.height=h; }
+  g.drawImage(bmp,sx,sy,sw,sh,0,0,w,h); return cv;
+}
+async function decodeBarcodePhoto(bmp){
+  for (const t of PHOTO_TILES.slice(1)){
+    const tx=decodeCanvas(cropBitmap(bmp,t,2000,false)); if(tx && classifyBarcode(tx)) return tx;
+    await new Promise(r=>setTimeout(r,0));
+  }
+  return null;
+}
+// Read the printed VIN from one photo. One photo can't be "read twice", so instead the same VIN has to come
+// out of two different views of the photo (normal/inverted contrast, different crops, turned sideways).
+async function vinFromPhoto(bmp, progress){
+  const views=[[[0,0,1,1],false,false],[[0,0,1,1],false,true],[[0.1,0.25,0.8,0.5],false,false],[[0.1,0.25,0.8,0.5],false,true],
+               [[0,0,1,0.5],false,false],[[0,0.5,1,0.5],false,false],[[0,0,1,1],true,false],[[0,0,1,1],true,true]];
+  const seen={};
+  for (let i=0;i<views.length;i++){
+    progress && progress(i+1, views.length);
+    const [tile,rot,inv]=views[i];
+    const v=await readVinText(cropBitmap(bmp,tile,1800,rot), inv);
+    if(v){ seen[v]=(seen[v]||0)+1; if(seen[v]>=2 || findCar({vin:v})) return v; }
+  }
+  return null;
+}
 function findCar(r){
   if(!r) return null;
   if(r.vin){ const c=S.cars.find(c=>String(c.vin||"").toUpperCase()===r.vin); if(c) return c; }
